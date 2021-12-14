@@ -8,5 +8,6 @@ Moreover, the file *G24_1691.txt* represents a simplicial complex, potentially h
 It is a list of lists of integers. In can be open with pickle via:
 ```pyton
     import pickle
-    with open(G24_1691.txt, "rb") as fp: Complex = pickle.load(fp)
+    with open(G24_1691.txt, "rb") as fp: 
+        SimplicialComplex = pickle.load(fp)
 ```
