@@ -4,6 +4,10 @@ LIST OF FUNCTIONS
 Misc:
 - ChronometerStart
 - ChronometerStop
+- PrintHomology
+- SaveSimplexTree
+- LoadSimplexTree
+- SaveSimplexTreeGAP
 
 Triangulation:
 - ClassTriangulation
@@ -21,16 +25,17 @@ Triangulation:
 Combinatorics:
 - GeneralizedSubdivision
 - CheckWeakStarCondition
+- InspectWeakStarCondition
 
 Contractions:
 - ContractTriangulation
 - ContractSimplexTreeFast
+- SimplifyDelaunay
 
 Projective Spaces:
 - GluingMapProjectiveSpace
 - InvCharacteristicMapProjectiveSpace
 - DomainProjectiveSpace
-- SimplifyDelaunay
 
 Grassmannian:
 - TwoBallsToBall
@@ -39,6 +44,33 @@ Grassmannian:
 - GluingMapGrassmannian
 - InvCharacteristicMapGrassmannian
 - DomainGrassmannian
+
+Lens Spaces:
+- GluingMapLensSpace1
+- InvCharacteristicMapLensSpace1
+- DomainLensSpace1
+- GluingMapLensSpace2
+- InvCharacteristicMapLensSpace2
+- DomainLensSpace2
+- GluingMapLensSpace3
+- InvCharacteristicMapLensSpace3
+- DomainLensSpace3
+
+Complex Projective Spaces:
+- GluingMapComplexProjectiveSpace
+- InvCharacteristicMapComplexProjectiveSpace
+- DomainComplexProjectiveSpace
+
+Special Orthogonal Group:
+- ReflectionAlongHyperplane
+- DecompositionInReflections
+- BallsToBall
+- BallToBalls
+- GluingMapOrthogonalGroup
+- InvCharacteristicMapOrthogonalGroup
+- DomainOrthogonalGroup
+- FindSequencesOrthogonalGroup
+
 ----------------------------------------------------------------------------'''
 
 import velour
@@ -70,6 +102,58 @@ def ChronometerStop(start_time, method='ms'):
     if method == 's':
         msg = 'Execution time: '+repr(round(elapsed_time_secs))+' s.\n'
     sys.stdout.write(msg); sys.stdout.flush()
+    
+def PrintHomology(self, Primes=[2,3]):
+    for p in Primes:
+        barcode = self.Complex.persistence(persistence_dim_max=True, homology_coeff_field = p)
+        homology = {homology_dim:0 for homology_dim in range(self.Complex.dimension()+1) }
+        for interval in barcode:
+            homology_dim = interval[0]
+            homology[homology_dim] += 1
+        msg = ['H'+repr(homology_dim)+' = '+repr(homology[homology_dim]) for homology_dim in homology ]
+        msg = '  -  '.join(msg)
+        msg = 'Homology over p='+repr(p)+':   '+msg
+        sys.stdout.write(msg+'\n')
+    
+def SaveSimplexTree(st, file, verbose=False):
+    # Generate list
+    if verbose: start_time = ChronometerStart('Generate list... ')
+    L = [filtr[0] for filtr in st.get_filtration()]
+    if verbose: ChronometerStop(start_time, method = 's')
+    # Save list
+    if verbose: start_time = ChronometerStart('Save list... ')
+    with open('Complexes/'+file+'.txt', "wb") as fp:   #Pickling
+        pickle.dump(L, fp)
+    if verbose: ChronometerStop(start_time, method = 's')
+
+def LoadSimplexTree(file):
+    # Load list
+    start_time = ChronometerStart('Load list... ')
+    with open(file, "rb") as fp:   # Unpickling
+        st_list = pickle.load(fp)
+    ChronometerStop(start_time, method = 's')
+
+    # Create simplex tree 
+    start_time = ChronometerStart('Create simplex tree... ')
+    st = gudhi.SimplexTree()
+    for simplex in st_list:
+        st.insert(simplex)
+    ChronometerStop(start_time, method = 's')
+
+    print('Simplex tree has '+repr(st.num_vertices())+' vertices.')
+    return st  
+            
+def SaveSimplexTreeGAP(st, file, verbose=False):
+    # Generate list
+    if verbose: start_time = ChronometerStart('Generate list... ')
+    L = [filtr[0] for filtr in st.get_filtration()]
+    if verbose: ChronometerStop(start_time, method = 's')
+    string = 'simplices:='+str(L)+';;'
+    # Save list
+    if verbose: start_time = ChronometerStart('Save list... ')
+    with open('Complexes/'+file+'_GAP.txt', 'w') as f:
+        f.write(string)
+    if verbose: ChronometerStop(start_time, method = 's')
     
 '''----------------------------------------------------------------------------
 Triangulation
@@ -453,6 +537,7 @@ def LocationMapSphereRadialFast(vect, self, epsilon = 1e-10):
 #                    #other possibility: intersection of the minimizers
     return minimal_face
 
+
 def TriangulatePoint():
     '''
     Returns a triangulation of the topological spa e consisting of only one point.
@@ -613,7 +698,7 @@ def TriangulateBall(tr_sphere, beta = 1/2, verbose = False):
         sys.stdout.write(' '+result_str)
     return tr_ball
 
-def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='homotopy', alpha=2, verbose=False):
+def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='star', alpha=3/4, verbose=False):
     ''' 
     Glue the ClassTriangulation tr_cell to tr_base, according to SimplicialMap.
     The gluing comes from a CW structure, whose current cell is described in the ClassCell Cell.
@@ -631,10 +716,10 @@ def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='homotopy', alpha=2, 
         ...
     - Cell: a ClassCell. Describes the current cell of the CW structure. 
     - SimplicialMap:
-    - method: can be 'homotopy' or 'direct'. Affects the computation of the LocationMap of the output.
-        In order to make the process of gluing cells work, as described in the paper, the method
-        has to be 'homotopy'.
-    - alpha: float in (1,+inf). Parameter to build the homotopy.
+    - method: can be 'homotopy', 'star' or 'direct'. Affects the computation of the LocationMap of the output.
+        In order to make the process of gluing cells work, as described in the paper, the method has to be 'star'.
+        If Delaunay simplifications are applied, one may choose 'homotopy'. 
+    - alpha: float in (0,1). Parameter to build the homotopy.
     - verbose: can be True or False. Whether to print commments.
     
     Output:
@@ -684,8 +769,8 @@ def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='homotopy', alpha=2, 
             return simplex
         else:
             return self.LowerSkeleton.LocationMap(vect)
-    
-    def LocationMapGluing(vect, self):
+        
+    def LocationMapGluingStar(vect, self):
         ''' 
         Gives a LocationMap for the glued complex. The glued complex can be seen as the (non-disjoint)
         union of K and L, where L is the base, and K the new cell (whose boundary is glued). 
@@ -711,20 +796,105 @@ def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='homotopy', alpha=2, 
             x = self.NewCell.InvCharacteristicMap(vect)
 
             # (3)-1 If the point, via the homotopy of the paper, lies inside the ball
-            if np.linalg.norm(x)<1/2:
-                x = 2*x              
+            if np.linalg.norm(x)<alpha:
+                x = x/alpha              
                 simplex_cell = self.NewTriangulation.LocationMap(x) #LocationMap of the point in the ball
                 simplex = [self.CharacteristicMap[v] for v in simplex_cell] 
                     #image of the simplex in the glued complex
                 simplex = sorted(list(set(simplex)))
                 return simplex
+    
+            # (3)-2 If the point, via the homotopy of the paper, lies on the boundary the ball
+            else:    
+                x = x/np.linalg.norm(x)     #the point is normalized
 
-            # (3)-1 If the point, via the homotopy of the paper, lies in the boundary the ball
+                # Image in lower skeleton
+                x_lower = self.NewCell.GluingMap(x) #image of the point in the lower skeleton
+                simplex_lower = self.LowerSkeleton.LocationMap(x_lower)                 
+
+                # Sanity check: simplex_lower must be included in simplex_current 
+                # (this comes from the star condition)
+                # Image in current cell
+                simplex_current = self.NewTriangulation.Boundary.LocationMap(x) #LocationMap of the point in the sphere
+                simplex_current = sorted(set([self.CharacteristicMap[v] for v in simplex_current]))#image of the simplex in the glued complex           
+#                assert set(simplex_current).issubset(simplex_lower), 'Error in LocationMapGluingStar: simplex_lower is '+repr(simplex_lower)+' and simplex_current is '+repr(simplex_current)                
+                if not set(simplex_current).issubset(simplex_lower):
+                    print('Error in LocationMapGluingStar: simplex_lower is '+repr(simplex_lower)+' and simplex_current is '+repr(simplex_current))                
+                return simplex_lower
+
+        else: return self.LowerSkeleton.LocationMap(vect)
+        
+    def LocationMapGluingHomotopy(vect, self):
+#         ''' 
+#         Gives a LocationMap for the glued complex. The glued complex can be seen as the (non-disjoint)
+#         union of K and L, where L is the base, and K the new cell (whose boundary is glued). 
+#         We have
+#         - self.Cell.GluingMap: a function that takes a point of the boundary of the cell as an input,
+#             and return a point of the base.
+#         - self.Cell.InvCharacteristicMap: a function that takes a point of the glued complex as an 
+#             input (the point being inside the corresponding cell), and return a point of the cell.
+#             It may be noncontinuous on the boundary of the cell.
+
+#         Let vect be a point of the CW complex. In order to compute LocationMapGluing, we:
+#             (1) Check if it is in the domain in the new cell
+#             (2) If it is, compute its image x in the ball via InvCharacteristicMap
+#             (3) See whether the norm of x is lower than 1/alpha.
+#                 If it is, x is multiplied by alpha, we compute its LocationMap in the ball, and return
+#                 its image in the glued complex.
+#                 If not, x is normalized, we compute its image in the LowerSkeleton via GluingMap,
+#                 and return its LocationMap in the lower skeleton.
+#         '''
+        alpha = 3/4
+        
+        # (1) Check if vect is in the domain of the new cell
+        if self.NewCell.Domain(vect):
+            # (2) Compute its image in the ball
+            x = self.NewCell.InvCharacteristicMap(vect)
+            
+            # (3)-1 If the point, via the homotopy of the paper, lies inside the ball
+            if np.linalg.norm(x)<alpha:
+                x = x/alpha              
+                simplex_cell = self.NewTriangulation.LocationMap(x) #LocationMap of the point in the ball
+                simplex = [self.CharacteristicMap[v] for v in simplex_cell] 
+                    #image of the simplex in the glued complex
+                simplex = sorted(list(set(simplex)))
+                return simplex
+            
+            # (3)-2 If the point, via the homotopy of the paper, lies on the boundary the ball
+            elif np.linalg.norm(x)<(1+alpha)/2:
+                x = x/np.linalg.norm(x)     #the point is normalized
+
+                # Image in current cell
+                simplex_current = self.NewTriangulation.LocationMap(x) #LocationMap of the point in the ball
+                simplex_current = simplex_current[0:self.NewCell.Dimension]
+                simplex_current = [self.CharacteristicMap[v] for v in simplex_current] 
+                simplex_current = sorted(list(set(simplex_current))) #image of the simplex in the glued complex
+                                
+                # Image in lower skeleton
+                x_lower = self.NewCell.GluingMap(x) #image of the point in the lower skeleton
+                simplex_lower = self.LowerSkeleton.LocationMap(x_lower)  
+                
+                # Union simplices
+                simplex = sorted(list(set(simplex_current+simplex_lower)))
+
+                # Sanity check
+                if not self.Complex.find(simplex):
+                    simplex_intersection = sorted(list(set(simplex_current).intersection(simplex_lower)))
+                    if len(simplex_intersection)==0:
+                        return simplex
+#                        raise ValueError('Problem in GlueCell --> Condition not satisfied with current ' + repr(simplex_current)+' and lower '+repr(simplex_lower)+'.')
+                    else:
+                        return simplex_intersection
+
+                return simplex
+
+            # (3)-3 If the point, via the homotopy of the paper, lies exactly on the boundary the ball
             else:
                 x = x/np.linalg.norm(x)     #the point is normalized
                 xx = self.NewCell.GluingMap(x) #image of the point in the lower skeleton
                 simplex = self.LowerSkeleton.LocationMap(xx)  
                 return simplex
+            
         else: return self.LowerSkeleton.LocationMap(vect)
         
     # Define a ClassTriangulation
@@ -735,9 +905,11 @@ def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='homotopy', alpha=2, 
     tr_gluing.LowerSkeleton = tr_base
     tr_gluing.CharacteristicMap = CharacteristicMap #dict
     
-    if method == 'homotopy': tr_gluing.add_LocationMap(LocationMapGluing)
-    if method == 'direct': tr_gluing.add_LocationMap(LocationMapGluingDirect)
-
+    if method == 'star': tr_gluing.add_LocationMap(LocationMapGluingStar)
+    elif method == 'homotopy': tr_gluing.add_LocationMap(LocationMapGluingHomotopy)
+    elif method == 'direct': tr_gluing.add_LocationMap(LocationMapGluingDirect)
+    else: raise ValueError('Wrong method in GlueCell: '+repr(method)+'.')
+        
     if verbose:
         result_str = 'Dimension/Simplices/Vertices = '+repr(st.dimension())+'/'+repr(st.num_simplices())+'/'+ repr(st.num_vertices())+'.\n'
         sys.stdout.write(' '+result_str)
@@ -748,7 +920,252 @@ def GlueCell(tr_cell, tr_base, Cell, SimplicialMap, method='homotopy', alpha=2, 
 Combinatorics
 ----------------------------------------------------------------------------'''
 
+def Circumcenter(pts):
+    '''
+    Found at https://gist.github.com/goretkin/3708293
+    '''
+    # (1) Find circumcenter in barycentric coordinates
+    if len(pts)==1:
+        return pts[0]
+    else:
+        pts = np.asarray(pts)
+        rows,cols = pts.shape
+        assert(rows <= cols + 1)    
+        A = np.bmat( [[ 2*np.dot(pts,pts.T), np.ones((rows,1)) ],
+                   [  np.ones((1,rows)) ,  np.zeros((1,1))  ]] )
+        b = np.hstack((np.sum(pts * pts, axis=1),np.ones((1))))
+        x = np.linalg.lstsq(A,b,rcond=None)[0] #the matrix may be (almost) singular
+        bary_coords = x[:-1]  
+
+        # (2) Convert to Euclidean coordinates    
+        center = np.dot(bary_coords,pts)
+        return center
+    
 def GeneralizedSubdivision(tr, VerticesToSubdivise = None, method = 'barycentric', normalize = True, define_tree = True, return_dict_NewVertices = False, verbose = False):
+    '''
+    Subdivise the simplicial complex K, given by the ClassTriangulation tr. It produces 
+    a generalized subdivision, whose fixed complex is K\K^-, where K^- is the union of 
+    the open stars of the vertices in VerticesToSubdivise. In other words, the subdivided 
+    edges are the ones who admit a point in VerticesToSubdivise.
+    Four different generalized subdivisions are available:
+        - method = 'barycentric'          ---> barycentric subdivision
+        - method = 'edgewise'             ---> edgewise subdivision
+        - method = 'Delaunay-barycentric' ---> Delaunay barycentric subdivision
+        - method = 'Delaunay-edgewise'    ---> Delaunay edgewise subdivision
+        - method = 'Delaunay-center'      ---> Delaunay circumcenter subdivision
+        - method = 'Delaunay-middle'      ---> Delaunay barycenter subdivision
+        /!\ edgewise (non-Delaunay) works only if the dimension of K is lower or equal to 3 /!\
+    /!\ Delaunay works only if K is a subset of the sphere /!\
+    The new coordinates are computed as barycenters of the corresponding simplices, and then
+    normalized if normalize == True. The new points are:
+        - if method = 'barycentric' or 'Delaunay-barycentric' ---> the barycenters of all 
+            the modified simplices.
+        - if method = 'edgewise' or 'Delaunay-edgewise' ---> the barycenters of all the 
+            modified edges (i.e. their midpoints).
+
+    Input: 
+    - tr: a ClassTriangulation, representing the simplicial complex to subdivise.
+    - VerticesToSubdivise: a list of int, representing vertices of K. If it is None, all
+        the vertices are subdivised.
+    - method: can be 'barycentric', 'edgewise', 'Delaunay-barycentric' or 'Delaunay-edgewise'. 
+        The method of subdivision.
+    - normalize: can be True or False, whether to normalize the vertices.
+    - define_tree: can be True or False, whether to endow the triangulation with the forest.
+    - return_dict_NewVertices: can be True or False, whether to return the dictionary describing
+        the new vertices as permutations of simplices (only for barycentric).
+    - verbose: can be True or False. Whether to print commments.
+        
+    Output:
+    - tr_sub: a ClassTriangulation, representing the subdivised simplicial complex.
+    /!\ By running the function, the input tr is modified into tr_sub /!\
+    '''
+    if method not in ['barycentric','edgewise','Delaunay-barycentric','Delaunay-edgewise','Delaunay-center','Delaunay-middle']:
+        raise ValueError('Error in GeneralizedSubdivision: method is '+repr(method))
+    
+    if verbose: 
+        if VerticesToSubdivise is None: sys.stdout.write('| GeneralizedSubdivision | '+method+' Global subdivision. ')
+        else: sys.stdout.write('| GeneralizedSubdivision | '+method+'. '+\
+                                  repr(len(VerticesToSubdivise))+'/'+repr(tr.Complex.num_vertices())+' points to subdivise. ')
+    st = tr.Complex       
+    if VerticesToSubdivise is None: VerticesToSubdivise = [filtr[0][0] for filtr in st.get_skeleton(0)]
+        #subdivise all
+    
+    # Get simplices to subdivise (simplices that admit a vertex in PointsToSubdivise)
+    Vertices =  (filtr[0][0] for filtr in st.get_skeleton(0))
+    dict_VerticesToSubdivise = {v:False for v in Vertices}
+    for v in VerticesToSubdivise: dict_VerticesToSubdivise[v] = True
+
+    Simplices = (filtr[0] for filtr in st.get_filtration() if len(filtr[0])>1) 
+        #only simplices of positive dimension
+    dict_SimplicesToSubdivise = {i:dict() for i in range(1,st.dimension()+1)} 
+        #one dict per positive dimension. Equals true is the simplex is modified
+    for simplex in Simplices: 
+        dict_SimplicesToSubdivise[len(simplex)-1][tuple(simplex)] = any([dict_VerticesToSubdivise[v] for v in simplex])
+        #dict_SimplicesToSubdivise[dim(simplex)][simplex] is True if the simplex is to subdivise, and False else.         
+            
+    # Label new vertices
+    Vertices = (filtr[0][0] for filtr in st.get_skeleton(0))
+    dict_NewVertices = {tuple([v]):v for v in Vertices} #labeling of the new vertices
+        #dict_NewVertices[simplex] is the index of the points corresponding to the new simplex.
+    l = max(dict_NewVertices.values())+1 #new index to start
+    if method =='barycentric' or method=='Delaunay-barycentric': 
+        dimensions_NewVertices = range(1,st.dimension()+1) #subdivise positive-dimensional simplices
+    elif method =='edgewise' or method=='Delaunay-edgewise': 
+        dimensions_NewVertices = [1] #only subdivise edges
+    elif method=='Delaunay-center' or method=='Delaunay-middle': 
+        dimensions_NewVertices = [st.dimension()] #only subdivise maximal faces
+
+    for d in dimensions_NewVertices:
+        for simplex in dict_SimplicesToSubdivise[d]:
+            if dict_SimplicesToSubdivise[d][simplex] == True:
+                dict_NewVertices[simplex] = l
+                l += 1
+                
+    # Compute coordinates
+    if method=='Delaunay-center':
+        NewCoordinates = {dict_NewVertices[v]:Circumcenter([tr.Coordinates[w] for w in v]) for v in dict_NewVertices}
+    else:
+        NewCoordinates = {dict_NewVertices[v]:np.mean([tr.Coordinates[w] for w in v],0) for v in dict_NewVertices}
+    if normalize: 
+        #normalize the coordinates
+        NewCoordinates = {v:NewCoordinates[v]/np.linalg.norm(NewCoordinates[v]) for v in NewCoordinates}        
+        
+    # Create subdivised complex 
+    if method=='Delaunay-barycentric' or method=='Delaunay-edgewise' or method=='Delaunay-center' or method=='Delaunay-middle':
+        # Compute Delaunay triangulation (given by convex hull of the vertices)        
+        points = np.array([NewCoordinates[v] for v in NewCoordinates])
+        hull = scipy.spatial.ConvexHull(points, qhull_options='QJ Qbb') 
+            # QJ to have all points, Qbb for Delaunay
+
+        # Test if qhull went well
+#        if verbose:
+#            # Compute minimal distance between neighbors
+#            tree = scipy.spatial.KDTree(points)
+#            ndist, nindex = tree.query(points, k=2)
+#            result_str = 'Minimal distance = '+repr(min(ndist[:,1]))+'. '
+#            sys.stdout.write(result_str)    
+#            
+#            # Compute selected vertices for hull    
+#            selectedvertices = set()
+#            for simplex in hull.simplices: selectedvertices.update(simplex)
+#            result_str = 'Hull vertices: '+repr(len(selectedvertices))+'/'+repr(len(NewCoordinates))+'. '
+#            sys.stdout.write(result_str)    
+        
+        # New ordering of the vertices (in case of dict_NewVertices.values() not being the interval, but missing values)
+        dict_NewVertices_list = list(dict_NewVertices.values())
+        dict_NewVertices_index = {i:dict_NewVertices_list[i] for i in range(len(dict_NewVertices))}
+        
+        # Create new complex
+        st_sub = gudhi.SimplexTree()
+        for simplex in hull.simplices: 
+            #re-index the vertices of simplex
+            simplex_NewNertices = sorted([dict_NewVertices_index[v] for v in simplex])
+            st_sub.insert(simplex_NewNertices)
+            
+        if define_tree == True:
+            # Get new tree. Obtained by associating a simplex (in the Delaunay triangulation)
+            # to the simplices (of the original triangulation) that share a vertex
+            MaximalSimplices = (tuple(filtr[0]) for filtr in st.get_filtration() if len(filtr[0])==st.dimension()+1)
+            Vertices = (filtr[0][0] for filtr in st.get_skeleton(0))
+            Simplices_by_vertices = {v:list() for v in Vertices}
+            for simplex in MaximalSimplices:
+                for v in simplex: Simplices_by_vertices[v].append(simplex)
+                    #Simplices_by_vertices associates to each vertex v the simplices that contain v
+
+            MaximalSimplices = (tuple(filtr[0]) for filtr in st.get_filtration() if len(filtr[0])==st.dimension()+1)
+                #/!\ works only for pure simplicial complex /!\
+            NewTree = {simplex:list() for simplex in MaximalSimplices}
+
+            dict_NewVertices_inv = {dict_NewVertices[v]:v for v in dict_NewVertices}
+            for simplex in hull.simplices: 
+                simplex_NewVertices = sorted([dict_NewVertices_index[v] for v in simplex])
+                simplex_OldVertices = [dict_NewVertices_inv[v] for v in simplex_NewVertices]
+                simplex_OldVertices = list(set([w for v in simplex_OldVertices for w in v]))
+
+                simplices_parent = [simplex_parent for v in simplex_OldVertices for simplex_parent in Simplices_by_vertices[v]]
+                simplices_parent = list(set(simplices_parent))
+                for simplex_parent in simplices_parent: NewTree[simplex_parent].append(tuple(simplex_NewVertices))
+
+            # Suppress repetitions
+            for simplex in NewTree: NewTree[simplex] = list(set(NewTree[simplex]))
+        else: NewTree = None
+    
+    else: #if not Delaunay
+        # Initialize subdivision
+        Simplices = (filtr[0] for filtr in st.get_filtration() if len(filtr[0])>1)
+        dict_Modifications = {tuple(simplex):list() for simplex in Simplices} 
+            #dict_Modifications[simplex] gathers the modification of simplex, i.e.,
+            #with what is replaced each simplex.
+        Vertices = (filtr[0][0] for filtr in st.get_skeleton(0))
+        for v in Vertices: dict_Modifications[tuple([v])] = [tuple([v])]
+ 
+        # Create new complex and insert vertices
+        st_sub = gudhi.SimplexTree()
+        Vertices = (filtr[0][0] for filtr in st.get_skeleton(0))
+        for v in Vertices: st_sub.insert([v])
+            
+        if method == 'barycentric': 
+            # Insert simplices
+            for d in range(1,st.dimension()+1):
+                for simplex in dict_SimplicesToSubdivise[d]:
+                    if dict_SimplicesToSubdivise[d][simplex] == False: #if the simplex is not modified, insert as it is
+                        st_sub.insert(simplex)
+                        dict_Modifications[simplex] = [simplex]
+                    else: #if the simplex is modified, cone its barycenter to its (modified) boundary
+                        new_vertex = dict_NewVertices[simplex]
+                        Faces = itertools.combinations(simplex, len(simplex)-1)
+                        for face in Faces: 
+                            for subface in dict_Modifications[face]   :#add the cones
+                                simplex_cone = subface+tuple([new_vertex])
+                                st_sub.insert(simplex_cone)                  
+                                dict_Modifications[simplex].append( tuple(sorted(simplex_cone)) )
+
+        if method == 'edgewise': 
+            # Define RepairEdgewiseSubdivision
+            RepairEdgewiseSubdivision = {1: {(): [((0,), (1,))], (0,): [((0,), (0, 1)), ((1,), (0, 1))], (1,): [((0,), (0, 1)), ((1,), (0, 1))], (0, 1): [((0,), (0, 1)), ((1,), (0, 1))]}, 2: {(): [((2,), (0,), (1,))], (0,): [((0, 1), (0,), (0, 2)), ((0, 1), (2,), (1,)), ((0, 1), (2,), (0, 2))], (1,): [((0, 1), (1, 2), (1,)), ((0, 1), (2,), (1, 2)), ((0, 1), (2,), (0,))], (2,): [((1, 2), (0, 2), (1,)), ((0,), (0, 2), (1,)), ((1, 2), (2,), (0, 2))], (0, 1): [((0, 1), (1, 2), (1,)), ((0, 1), (0,), (0, 2)), ((1, 2), (2,), (0, 2)), ((0, 1), (0, 2), (1, 2))], (0, 2): [((0, 1), (1, 2), (1,)), ((0, 1), (0,), (0, 2)), ((1, 2), (2,), (0, 2)), ((0, 1), (0, 2), (1, 2))], (1, 2): [((0, 1), (1, 2), (1,)), ((0, 1), (0,), (0, 2)), ((1, 2), (2,), (0, 2)), ((0, 1), (0, 2), (1, 2))], (0, 1, 2): [((0, 1), (1, 2), (1,)), ((0, 1), (0,), (0, 2)), ((1, 2), (2,), (0, 2)), ((0, 1), (0, 2), (1, 2))]}, 3: {(): [((2,), (0,), (3,), (1,))], (0,): [((0, 1), (2,), (3,), (1,)), ((0, 1), (0, 3), (3,), (0, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (2,), (3,), (0, 2))], (1,): [((0, 1), (2,), (3,), (1, 2)), ((0, 1), (2,), (0,), (3,)), ((0, 1), (1, 3), (3,), (1, 2)), ((0, 1), (1, 2), (1, 3), (1,))], (2,): [((1, 2), (2, 3), (0, 2), (3,)), ((0,), (3,), (0, 2), (1,)), ((1, 2), (3,), (0, 2), (1,)), ((1, 2), (2,), (2, 3), (0, 2))], (3,): [((2,), (0, 3), (1, 3), (1,)), ((0, 3), (1, 3), (2, 3), (3,)), ((2,), (0, 3), (1, 3), (2, 3)), ((2,), (0, 3), (0,), (1,))], (0, 1): [((0, 1), (0, 3), (1, 3), (1, 2)), ((1, 2), (0, 3), (3,), (0, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (1, 3), (3,)), ((1, 2), (2,), (3,), (0, 2)), ((0, 1), (1, 2), (1, 3), (1,))], (0, 2): [((0, 1), (0, 3), (3,), (1, 2)), ((1, 2), (0, 3), (2, 3), (3,)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 1), (1, 2), (3,), (1,)), ((1, 2), (2,), (2, 3), (0, 2))], (0, 3): [((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (2,), (1, 3), (1,)), ((0, 1), (2,), (2, 3), (0, 2)), ((0, 1), (0, 3), (1, 3), (2, 3)), ((0, 1), (2,), (1, 3), (2, 3))], (1, 2): [((0, 1), (1, 3), (2, 3), (1, 2)), ((0, 1), (2, 3), (0, 2), (3,)), ((0, 1), (1, 3), (2, 3), (3,)), ((0, 1), (0,), (3,), (0, 2)), ((0, 1), (2, 3), (0, 2), (1, 2)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (2,), (2, 3), (0, 2))], (1, 3): [((0, 1), (0, 3), (1, 3), (1, 2)), ((1, 2), (2,), (0, 3), (2, 3)), ((0, 1), (2,), (0, 3), (0,)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (2,), (0, 3), (1, 2)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3))], (2, 3): [((0, 3), (0,), (0, 2), (1,)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((1, 2), (0, 3), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3)), ((1, 2), (0, 3), (0, 2), (1,)), ((1, 2), (2,), (2, 3), (0, 2))], (1, 2, 3): [((0, 1), (0, 3), (1, 3), (1, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3)), ((1, 2), (2,), (2, 3), (0, 2))], (0, 2, 3): [((0, 1), (0, 3), (1, 3), (1, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3)), ((1, 2), (2,), (2, 3), (0, 2))], (0, 1, 3): [((0, 1), (0, 3), (1, 3), (1, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3)), ((1, 2), (2,), (2, 3), (0, 2))], (0, 1, 2): [((0, 1), (0, 3), (1, 3), (1, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3)), ((1, 2), (2,), (2, 3), (0, 2))], (0, 1, 2, 3): [((0, 1), (0, 3), (1, 3), (1, 2)), ((0, 1), (0, 3), (0,), (0, 2)), ((0, 1), (0, 3), (0, 2), (1, 2)), ((1, 2), (0, 3), (2, 3), (0, 2)), ((0, 3), (1, 3), (2, 3), (3,)), ((0, 1), (1, 2), (1, 3), (1,)), ((1, 2), (0, 3), (1, 3), (2, 3)), ((1, 2), (2,), (2, 3), (0, 2))]}}
+            
+            # Insert simplices (insert midpoint edges, and repair triangles and tetrahedra)
+            for d in range(1,st.dimension()+1):
+                for simplex in dict_SimplicesToSubdivise[d]:
+                    subdivised_vertices = [v for v in simplex if dict_VerticesToSubdivise[v]==True]
+                        #the vertices in VerticesToSubdivise and simplex
+
+                    # Relabel the vertices in [0,1,2,...]
+                    dict_relabel = {simplex[i]:i for i in range(len(simplex))}
+                    subdivised_vertices_relabel = [dict_relabel[v] for v in subdivised_vertices]
+                        #the vertices of subdivised_vertices, now indexed in [0,1,2,...]
+
+                    # Get reparation of the triangle
+                    simplices_repair = RepairEdgewiseSubdivision[d][tuple(subdivised_vertices_relabel)] 
+                        #reparations, i.e., simplices to fill the triangle  
+
+                    # Relabel back to X
+                    dict_relabel_inv = {dict_relabel[v]:v for v in dict_relabel}
+                    simplices_repair_relabel = [ tuple( [ dict_NewVertices[tuple([dict_relabel_inv[v] for v in vertex])] for vertex in simplex] ) for simplex in simplices_repair]
+
+                    # Insert the simplices
+                    for simplex_repair in simplices_repair_relabel: 
+                        st_sub.insert(simplex_repair)       
+                        dict_Modifications[simplex].append( tuple(sorted(simplex_repair)) )
+
+        # Get new tree
+        MaximalSimplices = [tuple(filtr[0]) for filtr in st.get_filtration() if len(filtr[0])==st.dimension()+1]
+            #/!\ works only for pure simplicial complex /!\
+        NewTree = {simplex:dict_Modifications[simplex] for simplex in MaximalSimplices}
+
+    # Modify the a ClassTriangulation tr
+    tr.Complex = st_sub
+    tr.Coordinates = NewCoordinates
+    if NewTree is not None and tr.Tree is not None: tr.Tree += [NewTree]
+    
+    if verbose:
+        result_str = 'Dim/Simp/Vert = '+repr(st_sub.dimension())+'/'+repr(st_sub.num_simplices())+'/'+ repr(st_sub.num_vertices())+'.\n'
+        sys.stdout.write(result_str)    
+
+    if return_dict_NewVertices: return tr, dict_NewVertices
+    else: return tr
+    
+def GeneralizedSubdivisionOLD(tr, VerticesToSubdivise = None, method = 'barycentric', normalize = True, define_tree = True, return_dict_NewVertices = False, verbose = False):
     '''
     Subdivise the simplicial complex K, given by the ClassTriangulation tr. It produces 
     a generalized subdivision, whose fixed complex is K\K^-, where K^- is the union of 
@@ -1031,7 +1448,31 @@ def CheckWeakStarCondition(st_X, st_Y, LocationMap, method = 'weak', verbose = F
             if is_simplicial: sys.stdout.write('The map is simplicial.\n')
             else: sys.stdout.write('The map is not simplicial. Problem with '+repr(simplex)+' --> '+repr(simplex_image)+'.\n')
         return True, RandomChoiceAdmissibleVertices
-    
+        
+def InspectWeakStarCondition(Sphere, Vertices, Cell, Skeleton, verbose):
+    '''
+    Give some information about the cell to be glued: the maximal edge length in the sphere and in the manifold.
+    We consider only edges that do not satiqfy the weak star condition.
+    '''
+    if verbose:
+        sys.stdout.write('| InspectStarCondition   | ')
+
+        # Maximal Edge length
+        Vertices_X = [filtr[0][0] for filtr in Sphere.Complex.get_skeleton(0)]
+        Edges = (filtr[0] for filtr in Sphere.Complex.get_skeleton(1) if len(filtr[0])==2)
+        CorrespondingEdges = {v:list() for v in Vertices_X} #to compute maximal edge length at the end
+        for edge in Edges:
+            CorrespondingEdges[edge[0]].append(edge)
+            CorrespondingEdges[edge[1]].append(edge)
+
+        EdgesToTest = itertools.chain.from_iterable((CorrespondingEdges[v] for v in Vertices))
+            # neighbors of vertices that do not satisfy the weak star condition
+        EdgesToTestLength = {tuple(sorted(edge)):np.linalg.norm(Sphere.Coordinates[edge[0]]-Sphere.Coordinates[edge[1]]) for edge in EdgesToTest}
+
+        edge_max = max(EdgesToTestLength, key=EdgesToTestLength.get)
+        length_max = EdgesToTestLength[edge_max]
+        dist_max = np.linalg.norm(Cell.GluingMap(Sphere.Coordinates[edge_max[0]])-Cell.GluingMap(Sphere.Coordinates[edge_max[1]]))
+        sys.stdout.write('Max edge length in sphere: '+repr(round(length_max, 4))+', in manifold: ' +repr(round(dist_max,4))+'.\n')    
 '''----------------------------------------------------------------------------
 Contractions
 ----------------------------------------------------------------------------'''
@@ -1555,3 +1996,193 @@ def DomainGrassmannian(vect, self):
     else:
         print('Error! Vector is wrong instance in DomainGrassmannian.')
         return False
+        
+'''----------------------------------------------------------------------------
+Lens Spaces
+----------------------------------------------------------------------------'''
+
+        
+def GluingMapLensSpace1(a, self):
+    return np.array([1,0,0])
+
+def InvCharacteristicMapLensSpace1(v, self):
+    return v
+
+def DomainLensSpace1(angle, self):
+    eps_lens = 1e-16
+    if np.abs(np.abs(angle[0])-1)<eps_lens:
+        return False
+    else:
+        return True
+
+def GluingMapLensSpace2(v, self):
+    v_complex = v[0]+v[1]*1j 
+    angle = np.angle(v_complex)      #in (-pi,pi]
+    angle = angle+np.pi              #in (0,2pi]
+    angle = angle%(2*np.pi/self.p)   #in (0,2*np.pi/Lp]    
+    angle = angle/(2*np.pi/self.p)   #in (0,1]    
+    angle = 2*angle-1                #in (-1,1]
+    return np.array([angle])
+
+def InvCharacteristicMapLensSpace2(v, self):
+    return v[0:2]
+
+def DomainLensSpace2(vect, self):
+    if len(vect)==2:
+        return True
+    else:
+        return False
+
+def GluingMapLensSpace3(v, self):
+    fv=v[0:2]
+    if v[2]>0:
+        theta = 2*np.pi*self.q/self.p
+        Rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+        fv = np.dot(Rot,fv)        
+    return fv
+
+def InvCharacteristicMapLensSpace3(v, self):
+    return v
+
+def DomainLensSpace3(vect, self):
+    eps_lens = 1e-16
+    if np.abs(np.linalg.norm(vect)-1)<eps_lens:
+        return True
+    else:
+        return False
+
+'''----------------------------------------------------------------------------
+Complex Projective Space
+----------------------------------------------------------------------------'''
+
+def GluingMapComplexProjectiveSpace(vect, self):
+    z = vect[::2]+1j*vect[1::2]
+    znew = np.conjugate(z[-1])*z[0:-1]
+    vnew = np.zeros(len(znew)*2)
+    vnew[::2], vnew[1::2] = np.real(znew), np.imag(znew)        
+    return vnew
+
+def InvCharacteristicMapComplexProjectiveSpace(vect, self):
+    return vect
+
+def DomainComplexProjectiveSpace(vect, self):
+    if isinstance(vect, np.ndarray):
+        if np.shape(vect) == tuple([self.Dimension,]):
+            return True
+        else: return False
+    else: return False
+        
+'''----------------------------------------------------------------------------
+Special Orthogonal Group
+----------------------------------------------------------------------------'''
+
+def ReflectionAlongHyperplane(v):
+    i = len(v)
+    I = np.eye(i)
+    R = 2*np.outer(v,v)/np.linalg.norm(v)**2-I
+    return R
+
+def DecompositionInReflections(O,eps=1e-10):
+    n = np.shape(O)[0]
+    Oi = O.copy()
+    Axes = dict()
+    Sequence = []
+    for i in range(n,1,-1):
+        Oi = Oi[0:i,0:i]
+        e1 = np.zeros(i); e1[0] = 1
+        ei = np.zeros(i); ei[-1] = 1
+        Oei = Oi.dot(ei)
+        v = (-Oei+ei)/2
+        if np.linalg.norm(v)>eps:
+            v = v/np.linalg.norm(v)
+            R = np.dot(ReflectionAlongHyperplane(e1), ReflectionAlongHyperplane(v))
+            Oi = R.dot(Oi)
+            Axes[i-1] = np.array(list(v)+[0]*(n-i))
+            Sequence.append(i-1)
+    return Axes, Sequence
+
+def BallsToBall(vects):
+    y = np.concatenate(vects)
+    if np.linalg.norm(y)==0: return y
+    norms = [np.linalg.norm(v) for v in vects]
+    c = max(norms)/np.linalg.norm(y)
+    return c*y
+
+def BallToBalls(y,Sequence):
+    indices = [0]+list(np.cumsum(Sequence))
+    axes = [y[indices[i]:indices[i+1]] for i in range(len(Sequence))]
+    c = max([np.linalg.norm(x) for x in axes])/np.linalg.norm(y)
+    if c == 0: 
+        axes = axes
+    else: 
+        axes = [ax/c for ax in axes]
+    return axes
+
+def GluingMapOrthogonalGroup(v, self):
+    eps = 1e-6
+    axes = BallToBalls(v,self.Sequence)
+    axes_lift = []
+    for ax in axes:
+        if np.linalg.norm(ax)>1-eps:
+            ax_lift = np.append(ax,0)
+        else: 
+            ax_lift = np.append(ax,np.sqrt(1-np.linalg.norm(ax)**2))
+        axes_lift.append(ax_lift)
+    axes_pad = [np.append(ax, np.zeros(self.n-len(ax))) for ax in axes_lift]
+    e1 = np.zeros(self.n); e1[0] = 1
+    Reflections = [ReflectionAlongHyperplane(v).dot(ReflectionAlongHyperplane(e1)) for v in axes_pad]
+    if len(Reflections)==1:
+        O = Reflections[0]
+    else:
+        O = np.linalg.multi_dot(Reflections)
+    return O
+
+def InvCharacteristicMapOrthogonalGroup(O, self):
+    Axes, Sequence = DecompositionInReflections(O)
+    assert self.Sequence == Sequence, 'Problem InvCharacteristicMapOrthogonalGroup'
+    
+    Axes_list = [Axes[v][0:v+1] for v in Sequence]
+    for i in range(len(Axes_list)):
+        vect = Axes_list[i]
+        if vect[-1] != 0: vect = vect*np.sign(vect[-1])
+        vect_del = vect[:-1]
+        Axes_list[i] = vect_del
+    v = BallsToBall(Axes_list)
+    return v
+
+def DomainOrthogonalGroup(O, self):
+    epsilon_domain = 1e-10
+    if isinstance(O, np.ndarray):
+        Axes, Sequence = DecompositionInReflections(O)
+        if Sequence == self.Sequence:
+            return True
+        else:
+            assert self.Sequence != [], 'Error in DomainOrthogonalGroup 0th cell: '+repr(Sequence)
+            return False
+    else:
+        print('Error! Vector is wrong instance in DomainGrassmannian.')
+        return False
+    
+def FindSequencesOrthogonalGroup(inp):
+    '''
+    Found at https://www.geeksforgeeks.org/print-all-increasing-subsequence-of-a-list/
+    '''
+    st = []
+    def FindSequences(inp, out) :
+        if len(inp)== 0 :
+            if len(out) != 0 :
+                # storing result
+                st.append(out)
+            return
+        FindSequences(inp[1:], out[:])
+        if len(out)== 0:
+            FindSequences(inp[1:], inp[:1])
+        elif inp[0] > out[-1] :
+            out.append(inp[0])
+            FindSequences(inp[1:], out[:])
+    L = []
+    FindSequences(inp,L)
+    st = [[]]+sorted(st, key=sum)
+    for x in st: x.reverse()
+    return st
+
